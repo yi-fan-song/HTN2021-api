@@ -25,6 +25,19 @@ const (
 	mlURL    = ""
 )
 
+var labels = [10]string{
+	"bicycle",
+	"dress",
+	"longsleeve",
+	"outwear",
+	"pants",
+	"shirt",
+	"shoes",
+	"shorts",
+	"skirt",
+	"t-shirt",
+}
+
 // Item type
 type Item struct {
 	gorm.Model
@@ -137,20 +150,27 @@ func registerHandlers(db *gorm.DB) error {
 		// Convert to a string and print it.
 		// fmt.Println(b.String())
 
-		resp, err := http.Post(mlURL, "application/json", &b)
-		if err != nil {
-			fmt.Println(err)
+		if mlURL != "" {
+			resp, err := http.Post(mlURL, "application/json", &b)
+			if err != nil {
+				fmt.Println(err)
+			}
+
+			// var respstr []byte
+			respstr := make([]byte, 32)
+
+			_, err = resp.Body.Read(respstr)
+			if err != nil {
+				fmt.Println(err)
+			}
+
+			index, err := strconv.Atoi(string(respstr))
+
+			fmt.Fprint(w, labels[index])
+		} else {
+			fmt.Fprint(w, r.Form.Get("label"))
 		}
 
-		// var respstr []byte
-		respstr := make([]byte, 32)
-
-		n, err := resp.Body.Read(respstr)
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		fmt.Fprint(w, string(respstr), n)
 	})
 
 	http.HandleFunc("/item", func(w http.ResponseWriter, r *http.Request) {
