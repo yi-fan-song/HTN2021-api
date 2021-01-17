@@ -4,23 +4,55 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"path"
+	"strconv"
+	"strings"
 
 	"image"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 
 	"gocv.io/x/gocv"
 )
 
-func init() error {
+const (
+	imageDir = "/data/images/"
+	mlURL    = ""
+)
+
+// Item type
+type Item struct {
+	gorm.Model
+	ImageFileName string
+	User          int
+	Label         string
+}
+
+type itemPostRequest struct {
+	imageFileName string
+	user          int
+	label         string
+}
+
+type itemGetResponse struct {
+	imageFileName string
+	user          int
+	label         string
+}
+
+func init() {
 	// create /data/images and /data/tmp
 
 	_ = os.Mkdir("/data/images", os.ModeDir)
 	_ = os.Mkdir("/data/tmp", os.ModeDir)
 }
 
-func registerHandlers() error {
+func registerHandlers(db *gorm.DB) error {
 
 	http.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "api available")
@@ -105,13 +137,13 @@ func registerHandlers() error {
 		// Convert to a string and print it.
 		// fmt.Println(b.String())
 
-		resp, err := http.Post("http://localhost:9001/", "application/json", &b)
+		resp, err := http.Post(mlURL, "application/json", &b)
 		if err != nil {
 			fmt.Println(err)
 		}
 
 		// var respstr []byte
-		respstr := make([]byte, 10<<21)
+		respstr := make([]byte, 32)
 
 		n, err := resp.Body.Read(respstr)
 		if err != nil {
@@ -130,6 +162,8 @@ func registerHandlers() error {
 		case http.MethodPost:
 			r.ParseMultipartForm(10 << 21)
 
+			var req itemPostRequest
+
 			file, handler, err := r.FormFile("image")
 			if err != nil {
 				fmt.Println("Error Retrieving the File")
@@ -141,7 +175,18 @@ func registerHandlers() error {
 			fmt.Printf("File Size: %+v\n", handler.Size)
 			fmt.Printf("MIME Header: %+v\n", handler.Header)
 
-			tempFile, err := ioutil.TempFile("/data/images", "upload-*.png")
+			req.user, err = strconv.Atoi(r.Form.Get("user"))
+			if err != nil {
+				fmt.Print(w, err)
+			}
+			req.label = r.Form.Get("label")
+
+			if req.label == "" {
+				fmt.Fprint(w, "Incorrect request")
+				return
+			}
+
+			tempFile, err := ioutil.TempFile("/data/images", "upload-*.jpg")
 			if err != nil {
 				fmt.Println(err)
 			}
@@ -159,20 +204,61 @@ func registerHandlers() error {
 				os.Remove(tempFile.Name())
 			}
 
+			req.imageFileName = strings.Replace(tempFile.Name(), imageDir, "", 1)
+
+			db.Create(&Item{ImageFileName: req.imageFileName, Label: req.label, User: req.user})
+
 			fmt.Fprintf(w, "Successfully Uploaded File\n")
 
 		case http.MethodGet:
+			params := r.URL.Query()
 
+			imgFilename := params.Get("image")
+
+			img, err := os.Open(path.Join(imageDir, imgFilename))
+			if err != nil {
+				fmt.Println(err)
+				fmt.Fprint(w, "failed to retrive image")
+			}
+			defer img.Close()
+
+			w.Header().Set("Content-Type", "image/jpg")
+			io.Copy(w, img)
 		}
 
+	})
+
+	http.HandleFunc("/items", func(w http.ResponseWriter, r *http.Request) {
+		params := r.URL.Query()
+
+		user, err := strconv.Atoi(params.Get("user"))
+		if err != nil {
+			fmt.Print(w, err)
+		}
+
+		var items []Item
+		db.Where("User = ?", user).Find(&items)
+
+		response, err := json.Marshal(items)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		fmt.Fprint(w, string(response))
 	})
 
 	return nil
 }
 
 func main() {
+	db, err := gorm.Open(sqlite.Open("/data/data.db"), &gorm.Config{})
+	if err != nil {
+		panic("failed to connect database")
+	}
 
-	if err := registerHandlers(); err != nil {
+	db.AutoMigrate(&Item{})
+
+	if err := registerHandlers(db); err != nil {
 		panic(err)
 	}
 
