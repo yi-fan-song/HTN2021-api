@@ -13,8 +13,11 @@ import (
 	"gocv.io/x/gocv"
 )
 
-type mlRequest struct {
-	data string
+func init() error {
+	// create /data/images and /data/tmp
+
+	_ = os.Mkdir("/data/images", os.ModeDir)
+	_ = os.Mkdir("/data/tmp", os.ModeDir)
 }
 
 func registerHandlers() error {
@@ -80,7 +83,7 @@ func registerHandlers() error {
 		for i := 0; i < 256; i++ {
 			for j := 0; j < 256; j++ {
 				for k := 0; k < 3; k++ {
-					out[i][j][2-k] = matbytes[k+j*3+i*256]
+					out[i][j][2-k] = matbytes[k+j*3+i*256*3]
 				}
 			}
 		}
@@ -119,43 +122,49 @@ func registerHandlers() error {
 	})
 
 	http.HandleFunc("/item", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
+		if r.Method != http.MethodPost && r.Method != http.MethodGet {
 			fmt.Fprint(w, "Method not implemented")
 			return
 		}
+		switch r.Method {
+		case http.MethodPost:
+			r.ParseMultipartForm(10 << 21)
 
-		r.ParseMultipartForm(10 << 21)
+			file, handler, err := r.FormFile("image")
+			if err != nil {
+				fmt.Println("Error Retrieving the File")
+				fmt.Println(err)
+				return
+			}
+			defer file.Close()
+			fmt.Printf("Uploaded File: %+v\n", handler.Filename)
+			fmt.Printf("File Size: %+v\n", handler.Size)
+			fmt.Printf("MIME Header: %+v\n", handler.Header)
 
-		file, handler, err := r.FormFile("image")
-		if err != nil {
-			fmt.Println("Error Retrieving the File")
-			fmt.Println(err)
-			return
+			tempFile, err := ioutil.TempFile("/data/images", "upload-*.png")
+			if err != nil {
+				fmt.Println(err)
+			}
+			defer tempFile.Close()
+
+			fileBytes, err := ioutil.ReadAll(file)
+			if err != nil {
+				fmt.Println(err)
+				os.Remove(tempFile.Name())
+			}
+
+			_, err = tempFile.Write(fileBytes)
+			if err != nil {
+				fmt.Println(err)
+				os.Remove(tempFile.Name())
+			}
+
+			fmt.Fprintf(w, "Successfully Uploaded File\n")
+
+		case http.MethodGet:
+
 		}
-		defer file.Close()
-		fmt.Printf("Uploaded File: %+v\n", handler.Filename)
-		fmt.Printf("File Size: %+v\n", handler.Size)
-		fmt.Printf("MIME Header: %+v\n", handler.Header)
 
-		tempFile, err := ioutil.TempFile("/data/images", "upload-*.png")
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer tempFile.Close()
-
-		fileBytes, err := ioutil.ReadAll(file)
-		if err != nil {
-			fmt.Println(err)
-			os.Remove(tempFile.Name())
-		}
-
-		_, err = tempFile.Write(fileBytes)
-		if err != nil {
-			fmt.Println(err)
-			os.Remove(tempFile.Name())
-		}
-
-		fmt.Fprintf(w, "Successfully Uploaded File\n")
 	})
 
 	return nil

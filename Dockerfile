@@ -1,9 +1,18 @@
 FROM golang:latest
 
-COPY ./src /go/src/api
-COPY ./data /data
+RUN go get -u -d gocv.io/x/gocv
+
+WORKDIR /go/src/gocv.io/x/gocv
+
+COPY ./Makefile .
+RUN make install
 
 WORKDIR /go/src/api
+
+RUN go get -u gorm.io/gorm
+RUN go get -u gorm.io/driver/sqlite
+
+COPY ./src .
 
 EXPOSE 9000
 
